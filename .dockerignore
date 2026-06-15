@@ -1,0 +1,7 @@
+model.pkl
+*.png
+predictions_test.csv
+elo_ratings.csv
+__pycache__
+.git
+venv/
