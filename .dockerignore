@@ -1,7 +1,10 @@
-model.pkl
-*.png
-predictions_test.csv
-elo_ratings.csv
+models/
+data/
+assets/
+docs/
+notebooks/
+tests/
 __pycache__
 .git
 venv/
+.DS_Store

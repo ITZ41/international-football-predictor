@@ -39,7 +39,7 @@ TOURNAMENT_MAP = {
 }
 
 
-def load_data(data_dir="."):
+def load_data(data_dir="data"):
     """Load all CSV files and return as DataFrames."""
     results = pd.read_csv(f"{data_dir}/results.csv", parse_dates=["date"])
     goalscorers = pd.read_csv(f"{data_dir}/goalscorers.csv", parse_dates=["date"])

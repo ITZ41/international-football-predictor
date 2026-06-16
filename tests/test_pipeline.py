@@ -42,7 +42,7 @@ print("TEST 1: Model Artifacts")
 print("=" * 60)
 
 try:
-    with open("model.pkl", "rb") as f:
+    with open("models/model.pkl", "rb") as f:
         artifacts = pickle.load(f)
     report("model.pkl loads", True)
 except Exception as e:
@@ -53,7 +53,7 @@ except Exception as e:
 required_keys = [
     "model", "feature_cols", "poisson_home", "poisson_away",
     "poisson_feature_cols", "poisson_scaler", "dc_rho",
-    "meta_model", "optimal_thresholds", "elo_history",
+    "ensemble_weights", "optimal_thresholds", "elo_history",
     "final_elos", "name_map",
 ]
 missing = [k for k in required_keys if k not in artifacts]
@@ -95,7 +95,7 @@ print("=" * 60)
 from features import load_data, standardize_results, encode_tournament
 from predict import compute_all_features_for_match, dc_tau, poisson_dc_scorelines
 
-results, _, _, _ = load_data(".")
+results, _, _, _ = load_data("data")
 results = standardize_results(results, artifacts["name_map"])
 results = results.sort_values("date").reset_index(drop=True)
 
@@ -135,8 +135,8 @@ for home, away, tournament, neutral, date_str, actual in wc_matches:
         X_xgb = np.array([[xgb_fd.get(col, 0) for col in feature_cols]])
         xgb_proba = artifacts["model"].predict_proba(X_xgb)[0]
 
-        meta_input = np.hstack([xgb_proba, [0.33, 0.34, 0.33]]).reshape(1, -1)
-        ens_proba = artifacts["meta_model"].predict_proba(meta_input)[0]
+        w = artifacts["ensemble_weights"]
+        ens_proba = w[0] * xgb_proba + w[1] * np.array([0.33, 0.34, 0.33])
 
         top2 = set(np.argsort(ens_proba)[-2:])
         is_top2 = actual in top2

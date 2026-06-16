@@ -23,7 +23,7 @@ from sklearn.linear_model import PoissonRegressor, LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 from scipy.stats import poisson
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize, minimize_scalar
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -34,7 +34,7 @@ from features import (
     get_feature_columns, ELO_INITIAL, ELO_K, ELO_HOME_BOOST
 )
 
-DATA_DIR = "."
+DATA_DIR = "data"
 TARGET_NAMES = ["Home Win", "Draw", "Away Win"]
 
 
@@ -179,19 +179,33 @@ def train_poisson_models(results, features):
 
 
 # ------------------------------------------------------------------
-# Ensemble meta-model
+# Ensemble weight optimization (Nelder-Mead)
 # ------------------------------------------------------------------
 def train_ensemble(cls_proba_val, poisson_proba_val, y_val):
-    print("\nTraining ensemble meta-model...")
-    X_meta = np.hstack([cls_proba_val, poisson_proba_val])
-    meta_model = LogisticRegression(solver='lbfgs', max_iter=5000, C=1.0)
-    meta_model.fit(X_meta, y_val)
-    meta_proba = meta_model.predict_proba(X_meta)
-    meta_preds = meta_model.predict(X_meta)
-    print(f"  Ensemble validation accuracy: {accuracy_score(y_val, meta_preds):.4f}")
-    print(f"  Ensemble validation log-loss: {log_loss(y_val, meta_proba):.4f}")
-    print(f"  Ensemble validation macro F1: {f1_score(y_val, meta_preds, average='macro'):.4f}")
-    return meta_model
+    """
+    Find optimal ensemble weights via Nelder-Mead optimization on validation accuracy.
+    Replaces old LogisticRegression meta-model that overfit val set (58.8% < XGB 59.6%).
+    """
+    def neg_objective(weights):
+        w = np.abs(weights)
+        w = w / w.sum()
+        ensemble_proba = w[0] * cls_proba_val + w[1] * poisson_proba_val
+        preds = np.argmax(ensemble_proba, axis=1)
+        acc = accuracy_score(y_val, preds)
+        ll = log_loss(y_val, ensemble_proba)
+        return -(0.7 * acc - 0.3 * (ll / 1.1))
+
+    result = minimize(neg_objective, [0.5, 0.5], method='Nelder-Mead',
+                      options={'xatol': 1e-4, 'fatol': 1e-5, 'maxiter': 10000})
+    weights = np.abs(result.x)
+    weights = weights / weights.sum()
+
+    ensemble_proba = weights[0] * cls_proba_val + weights[1] * poisson_proba_val
+    preds = np.argmax(ensemble_proba, axis=1)
+    print(f"\nOptimized ensemble weights: XGB={weights[0]:.4f} Poisson={weights[1]:.4f}")
+    print(f"  Val accuracy: {accuracy_score(y_val, preds):.4f}")
+    print(f"  Val log-loss: {log_loss(y_val, ensemble_proba):.4f}")
+    return weights
 
 
 # ------------------------------------------------------------------
@@ -214,7 +228,7 @@ def main():
     elo_df = pd.DataFrame([
         {"team": t, "elo": e} for t, e in sorted(final_elos.items(), key=lambda x: -x[1])
     ])
-    elo_df.to_csv("elo_ratings.csv", index=False)
+    elo_df.to_csv("data/elo_ratings.csv", index=False)
     print(f"  Saved elo_ratings.csv ({len(elo_df)} teams)")
 
     print("\nBuilding feature matrix...")
@@ -475,7 +489,7 @@ def main():
     val_away_pred = poisson_away.predict(X_val_pois)
     pois_val_proba = poisson_win_draw_loss_dc(val_home_pred, val_away_pred, rho)
 
-    meta_model = train_ensemble(cal_val_proba, pois_val_proba, y_th_val)
+    ensemble_weights = train_ensemble(cal_val_proba, pois_val_proba, y_th_val)
 
     # Test set ensemble
     X_test_pois_raw = features.loc[test_mask, poisson_fc].values.astype(np.float64)
@@ -483,7 +497,10 @@ def main():
     test_home_pred = poisson_home.predict(X_test_pois)
     test_away_pred = poisson_away.predict(X_test_pois)
     pois_test_proba = poisson_win_draw_loss_dc(test_home_pred, test_away_pred, rho)
-    ensemble_test_proba = meta_model.predict_proba(np.hstack([cal_proba_test, pois_test_proba]))
+    ensemble_test_proba = (
+        ensemble_weights[0] * cal_proba_test +
+        ensemble_weights[1] * pois_test_proba
+    )
     ensemble_preds = np.argmax(ensemble_test_proba, axis=1)
 
     # ------------------------------------------------------------------
@@ -508,7 +525,7 @@ def main():
             axes[row, i].set_title(f"{name}: {tname}")
             axes[row, i].legend()
     plt.tight_layout()
-    plt.savefig("calibration_plot.png", dpi=150, bbox_inches="tight")
+    plt.savefig("assets/calibration_plot.png", dpi=150, bbox_inches="tight")
     plt.close()
     print("  Saved calibration_plot.png")
 
@@ -528,7 +545,7 @@ def main():
     ax.set_yticklabels(top["feature"].values)
     ax.invert_yaxis()
     plt.tight_layout()
-    plt.savefig("feature_importance.png", dpi=150, bbox_inches="tight")
+    plt.savefig("assets/feature_importance.png", dpi=150, bbox_inches="tight")
     plt.close()
 
     # ------------------------------------------------------------------
@@ -547,7 +564,7 @@ def main():
     test_preds["ensemble_prob_hw"] = ensemble_test_proba[:, 0]
     test_preds["ensemble_prob_d"] = ensemble_test_proba[:, 1]
     test_preds["ensemble_prob_aw"] = ensemble_test_proba[:, 2]
-    test_preds.to_csv("predictions_test.csv", index=False)
+    test_preds.to_csv("data/predictions_test.csv", index=False)
     print(f"\n  Saved predictions_test.csv ({len(test_preds)} rows)")
 
     # ------------------------------------------------------------------
@@ -562,7 +579,7 @@ def main():
         "poisson_feature_cols": poisson_fc,
         "poisson_scaler": poisson_scaler,
         "dc_rho": rho,
-        "meta_model": meta_model,
+        "ensemble_weights": ensemble_weights,
         "draw_model": draw_model,
         "ha_model": ha_model,
         "draw_threshold": best_draw_thresh,
@@ -574,7 +591,7 @@ def main():
         "ELO_K": ELO_K,
         "ELO_HOME_BOOST": ELO_HOME_BOOST,
     }
-    with open("model.pkl", "wb") as f:
+    with open("models/model.pkl", "wb") as f:
         pickle.dump(artifacts, f)
     print("  Saved model.pkl")
 

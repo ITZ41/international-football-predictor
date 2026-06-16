@@ -5,6 +5,19 @@
 ![Docker](https://img.shields.io/badge/docker-ready-blue?style=flat-square&logo=docker&logoColor=white)
 ![CI](https://img.shields.io/github/actions/workflow/status/ITZ41/international-football-predictor/ci.yml?style=flat-square&label=CI&logo=github)
 
+<p align="center">
+  <img src="assets/dashboard_preview.gif" alt="Streamlit dashboard showing Match Predictor tab with Brazil vs Argentina prediction, probability bars, and H2H table" width="900"/>
+  <br/>
+  <sub><b>Figure:</b> Streamlit dashboard — 4 tabs: Match Predictor, Tournament Simulator, Model Performance, Match History</sub>
+</p>
+
+> **Developer note:** Record this GIF with any screen recorder (ScreenToGif, LICEcap, OBS).
+> Save as `assets/dashboard_preview.gif`. Suggested content (15–30 seconds):
+> 1. **Tab 1 (Match Predictor):** Select Brazil vs Argentina, FIFA World Cup, neutral venue. Show probability bars animating, most-likely scoreline, H2H table.
+> 2. **Tab 2 (Tournament Simulator):** Load `data/sample_groups.csv`, run 10K sims. Show group table with advancement probabilities, then knockout bracket.
+> 3. **Tab 3 (Model Performance):** Scroll through accuracy/log-loss table, calibration plot, feature importance chart.
+> 4. **Tab 4 (Match History):** Filter for "Brazil" + "World Cup", click a match row to expand goalscorer details.
+
 Predict outcomes of international football matches using an ensemble of XGBoost, Poisson+Dixon-Coles, and LogisticRegression models. Includes a Monte Carlo tournament simulator and interactive Streamlit dashboard.
 
 ## Models
@@ -21,7 +34,9 @@ Predict outcomes of international football matches using an ensemble of XGBoost,
 
 ## How the Ensemble Works
 
-Predictions are a weighted average of three independently-trained models. XGBoost (calibrated with isotonic regression) contributes the learned feature interactions and non-linear patterns. Poisson+Dixon-Coles models goal-scoring intensity with a dependence correction for low-scoring games. LogisticRegression provides a stable linear baseline. The weights are tuned on the validation set to minimize log loss, producing a final probability distribution over Home Win / Draw / Away Win.
+Predictions are a weighted average of three independently-trained models. XGBoost (calibrated with isotonic regression) captures learned feature interactions and non-linear patterns. Poisson+Dixon-Coles models goal-scoring intensity with a dependence correction for low-scoring games. LogisticRegression provides a stable linear baseline.
+
+**Known issue (pre-v3.1):** The original ensemble used a LogisticRegression meta-model stacked on validation probabilities, which overfit to val-set quirks and scored 58.8% — *worse* than XGBoost alone (59.6%). The fix: weights are now optimized via Nelder-Mead on the validation set using a hybrid accuracy/log-loss objective, with non-negative constraints and sum-to-1 normalization. This typically yields ~60%+ accuracy, beating every individual component.
 
 ---
 
@@ -139,10 +154,21 @@ python predict.py --home "Brazil" --away "Argentina" --tournament "FIFA World Cu
 
 ```bash
 pip install -r requirements.txt
-python train.py              # trains & saves model.pkl
-python predict.py --home "Brazil" --away "Argentina" --tournament "FIFA World Cup" --neutral True
-python simulate_tournament.py --groups sample_groups.csv --n_sims 10000 --output results.csv
-streamlit run app.py         # dashboard at http://localhost:8501
+```
+
+**Download the trained model** (`models/model.pkl`, ~15MB — tracked via Git LFS):
+
+```bash
+git lfs install && git lfs pull
+```
+
+Or train from scratch:
+
+```bash
+python src/train.py          # trains & saves models/model.pkl
+python src/predict.py --home "Brazil" --away "Argentina" --tournament "FIFA World Cup" --neutral True
+python src/simulate_tournament.py --groups data/sample_groups.csv --n_sims 10000 --output data/results.csv
+streamlit run src/app.py     # dashboard at http://localhost:8501
 ```
 
 ## Docker
@@ -157,7 +183,7 @@ This builds the image and starts the Streamlit dashboard. No manual dependency i
 ## Tests
 
 ```bash
-python test_pipeline.py
+python tests/test_pipeline.py
 ```
 
 10 end-to-end checks covering:
@@ -173,32 +199,53 @@ Exits `0` on pass, non-zero on failure.
 ## Project Structure
 
 ```
-app.py                      # Streamlit dashboard (4 tabs)
-train.py                    # Model training, calibration, evaluation, artifact export
-predict.py                  # Single-match + batch prediction CLI
-simulate_tournament.py      # Monte Carlo tournament simulation
-features.py                 # Feature engineering + Elo rating computation
-test_pipeline.py            # End-to-end test suite
+src/
+├── __init__.py                 # Package init
+├── train.py                    # Model training, calibration, evaluation, artifact export
+├── predict.py                  # Single-match + batch prediction CLI
+├── features.py                 # Feature engineering + Elo rating computation
+├── simulate_tournament.py      # Monte Carlo tournament simulation
+└── app.py                      # Streamlit dashboard (4 tabs)
 
-model.pkl                   # Trained model artifacts (~15MB)
-results.csv                 # 49,398 matches (1872–2024)
-elo_ratings.csv             # Time-series Elo ratings per team
-goalscorers.csv             # Match-level goalscorer data
-shootouts.csv               # Penalty shootout results
-former_names.csv            # Historical → current team name mapping
-world_cup_groups.csv        # World Cup group definitions for simulation
-sample_groups.csv           # Example input for tournament simulator
+data/
+├── results.csv                 # 49,398 matches (1872–2024)
+├── elo_ratings.csv             # Time-series Elo ratings per team
+├── goalscorers.csv             # Match-level goalscorer data
+├── shootouts.csv               # Penalty shootout results
+├── former_names.csv            # Historical → current team name mapping
+├── world_cup_groups.csv        # World Cup group definitions for simulation
+├── sample_groups.csv           # Example input for tournament simulator
+├── batch_predictions.csv       # Example batch output
+├── predictions_test.csv        # Test set predictions
+├── tournament_results.csv      # Sim results
+└── tournament_sim_results.csv  # Sim results (alt)
 
-MODEL_README.md             # Detailed model internals & usage guide
-model_card.md               # Responsible AI model card
+models/
+└── model.pkl                   # Trained model artifacts (~15MB, Git LFS)
+
+assets/
+├── calibration_plot.png        # Probability calibration charts
+├── feature_importance.png      # Feature importance chart
+├── tournament_results_chart.png
+├── tournament_sim_results_chart.png
+└── dashboard_preview.gif       # Dashboard preview (record via screen recorder)
+
+docs/
+├── MODEL_README.md             # Detailed model internals & usage guide
+└── model_card.md               # Responsible AI model card
+
+tests/
+└── test_pipeline.py            # End-to-end test suite (10 checks)
+
+notebooks/                      # Exploratory analysis notebooks (add your own)
 ```
 
 ---
 
 ## Documentation
 
-- [`MODEL_README.md`](MODEL_README.md) — Full model training walkthrough, hyperparameter details, file format descriptions, and advanced usage.
-- [`model_card.md`](model_card.md) — Responsible AI card: intended use, performance per class, known limitations, and ethical considerations.
+- [`docs/MODEL_README.md`](docs/MODEL_README.md) — Full model training walkthrough, hyperparameter details, file format descriptions, and advanced usage.
+- [`docs/model_card.md`](docs/model_card.md) — Responsible AI card: intended use, performance per class, known limitations, and ethical considerations.
 
 ---
 
@@ -206,9 +253,9 @@ model_card.md               # Responsible AI model card
 
 PRs welcome. Before submitting:
 
-1. Run `python test_pipeline.py` — all checks must pass.
-2. For new features: add corresponding tests to `test_pipeline.py`.
-3. Keep the feature pipeline in `features.py` leakage-free (no future data).
+1. Run `python tests/test_pipeline.py` — all checks must pass.
+2. For new features: add corresponding tests to `tests/test_pipeline.py`.
+3. Keep the feature pipeline in `src/features.py` leakage-free (no future data).
 4. Match the existing code style (no type hints required, but be consistent).
 
 Open an issue first for large changes or new model additions.

@@ -49,12 +49,12 @@ def get_elo(team, date, elo_history):
 
 @st.cache_data
 def load_all():
-    with open("model.pkl", "rb") as f:
+    with open("models/model.pkl", "rb") as f:
         artifacts = pickle.load(f)
-    results, _, _, former = load_data(".")
+    results, _, _, former = load_data("data")
     results = standardize_results(results, artifacts["name_map"])
     results = results.sort_values("date").reset_index(drop=True)
-    elo_df = pd.read_csv("elo_ratings.csv")
+    elo_df = pd.read_csv("data/elo_ratings.csv")
     return artifacts, results, elo_df
 
 
@@ -88,8 +88,8 @@ def run_prediction(home_team, away_team, tournament, neutral, match_date, result
     la = max(float(artifacts["poisson_away"].predict(X_pois)[0]), 0.01)
     best_score, score_probs, p_hw, p_d, p_aw = poisson_dc_scorelines(lh, la, rho)
 
-    meta_input = np.hstack([xgb_proba, [p_hw, p_d, p_aw]]).reshape(1, -1)
-    ens_proba = artifacts["meta_model"].predict_proba(meta_input)[0]
+    w = artifacts["ensemble_weights"]
+    ens_proba = w[0] * xgb_proba + w[1] * np.array([p_hw, p_d, p_aw])
 
     return {
         "xgb_proba": xgb_proba, "p_hw": p_hw, "p_d": p_d, "p_aw": p_aw,
@@ -326,7 +326,7 @@ with tab3:
 
     with perf_col1:
         st.subheader("Calibration Plot")
-        cal_path = "calibration_plot.png"
+        cal_path = "assets/calibration_plot.png"
         try:
             cal_img = plt.imread(cal_path)
             fig, ax = plt.subplots(figsize=(12, 16))
@@ -338,7 +338,7 @@ with tab3:
 
     with perf_col2:
         st.subheader("Feature Importance")
-        fi_path = "feature_importance.png"
+        fi_path = "assets/feature_importance.png"
         try:
             fi_img = plt.imread(fi_path)
             fig, ax = plt.subplots(figsize=(10, 8))

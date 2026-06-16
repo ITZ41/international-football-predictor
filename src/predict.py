@@ -26,7 +26,7 @@ TARGET_NAMES = ["Home Win", "Draw", "Away Win"]
 MAX_GOALS = 6
 
 
-def load_artifacts(path="model.pkl"):
+def load_artifacts(path="models/model.pkl"):
     try:
         with open(path, "rb") as f:
             return pickle.load(f)
@@ -318,9 +318,9 @@ def predict_single(home_team, away_team, tournament, neutral, artifacts, results
     best_score, score_probs, p_hw, p_d, p_aw = poisson_dc_scorelines(lh, la, rho)
     top_scores = sorted(score_probs.items(), key=lambda x: -x[1])[:5]
 
-    # Ensemble
-    meta_input = np.hstack([xgb_proba, [p_hw, p_d, p_aw]]).reshape(1, -1)
-    ensemble_proba = artifacts["meta_model"].predict_proba(meta_input)[0]
+    # Ensemble (weighted average, weights from Nelder-Mead optimization)
+    w = artifacts["ensemble_weights"]
+    ensemble_proba = w[0] * xgb_proba + w[1] * np.array([p_hw, p_d, p_aw])
 
     # H2H
     home_r = name_map.get(home_team, home_team)
@@ -438,8 +438,8 @@ def predict_batch(fixtures_csv, output_csv, artifacts, results):
             la = max(float(artifacts["poisson_away"].predict(X_pois)[0]), 0.01)
             best_sl, _, p_hw, p_d, p_aw = poisson_dc_scorelines(lh, la, rho)
 
-            meta_input = np.hstack([xgb_proba, [p_hw, p_d, p_aw]]).reshape(1, -1)
-            ens_proba = artifacts["meta_model"].predict_proba(meta_input)[0]
+            w = artifacts["ensemble_weights"]
+            ens_proba = w[0] * xgb_proba + w[1] * np.array([p_hw, p_d, p_aw])
 
             predictions.append({
                 "home_team": home_team, "away_team": away_team,
@@ -481,7 +481,7 @@ def main():
     args = parser.parse_args()
 
     artifacts = load_artifacts()
-    results, _, _, _ = load_data(".")
+    results, _, _, _ = load_data("data")
     results = standardize_results(results, artifacts["name_map"])
     results = results.sort_values("date").reset_index(drop=True)
 

@@ -22,9 +22,9 @@ jobs:
 
       - name: Run tests (skip if model not trained)
         run: |
-          if [ -f model.pkl ]; then
-            python test_pipeline.py
+          if [ -f models/model.pkl ]; then
+            python tests/test_pipeline.py
           else
-            echo "model.pkl not found — skipping model tests (run train.py first)"
+            echo "models/model.pkl not found — skipping model tests (run src/train.py first)"
             exit 0
           fi

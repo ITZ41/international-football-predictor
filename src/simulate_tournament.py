@@ -142,9 +142,9 @@ def get_match_probs(home_team, away_team, artifacts, results, match_date=None):
 
     _, _, p_hw, p_d, p_aw = _poisson_dc_scorelines(lh, la, rho)
 
-    # Ensemble
-    meta_input = np.hstack([xgb_proba, [p_hw, p_d, p_aw]]).reshape(1, -1)
-    ens_proba = artifacts["meta_model"].predict_proba(meta_input)[0]
+    # Ensemble (weighted average)
+    w = artifacts["ensemble_weights"]
+    ens_proba = w[0] * xgb_proba + w[1] * np.array([p_hw, p_d, p_aw])
 
     return ens_proba[0], ens_proba[1], ens_proba[2]
 
@@ -343,9 +343,9 @@ def main():
     args = parser.parse_args()
 
     print("Loading model and data...")
-    with open("model.pkl", "rb") as f:
+    with open("models/model.pkl", "rb") as f:
         artifacts = pickle.load(f)
-    results, _, _, _ = load_data(".")
+    results, _, _, _ = load_data("data")
     results = standardize_results(results, artifacts["name_map"])
     results = results.sort_values("date").reset_index(drop=True)
 
